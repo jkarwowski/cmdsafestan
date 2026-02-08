@@ -19,6 +19,13 @@
 # This example enables pedantic mode
 # STANCFLAGS+= --warn-pedantic
 
+# Use a local SafeStan compiler checkout instead of downloading release binaries.
+# This repository provides it as the "safestan" submodule.
+# STANC3=safestan
+
+# SafeStan example flags (model-specific, typically set per-command):
+# STANCFLAGS+= --sstanc --sstan-protect=y
+
 # Enable C++ compiler and linker optimization recommended by Stan developers.
 # Can significantly slow down compilation.
 # STAN_CPP_OPTIMS=true

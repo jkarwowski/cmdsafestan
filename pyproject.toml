@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cmdsafestan"
+version = "0.1.0"
+description = "SafeStan-first CmdStan command wrapper."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+cmdsafestan = "cmdsafestan_cli:main"
+
+[tool.setuptools]
+py-modules = ["cmdsafestan_cli"]
+
+[tool.uv]
+package = true

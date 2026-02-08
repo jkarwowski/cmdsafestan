@@ -1,3 +1,7 @@
 [submodule "stan"]
 	path = stan
-        url = https://github.com/stan-dev/stan
+	url = https://github.com/stan-dev/stan
+[submodule "safestan"]
+	path = safestan
+	url = https://github.com/jkarwowski/safestanc3
+	branch = master
