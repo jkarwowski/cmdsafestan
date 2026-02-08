@@ -4,59 +4,63 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
+from shutil import which
 
 
 def main() -> int:
-    test_dir = Path(__file__).resolve().parent
-    cmdstan_home = test_dir.parent.parent
-    cmdsafestan = cmdstan_home / "cmdsafestan"
-    model_template = test_dir / "models" / "good_bernoulli.stan"
+    if not Path("makefile").exists():
+        print("Run this test from the cmdstan/ root.", file=sys.stderr)
+        return 2
 
-    if not cmdsafestan.exists():
-        print(f"Missing cmdsafestan command: {cmdsafestan}", file=sys.stderr)
+    if which("cmdsafestan") is None:
+        print(
+            "cmdsafestan is not on PATH. Run `uv sync` and execute this test via `uv run`.",
+            file=sys.stderr,
+        )
+        return 2
+
+    model = Path("tests/safestan/models/good_bernoulli.stan")
+    generated_hpp = model.with_suffix(".hpp")
+    if not model.exists():
+        print(f"Missing test model: {model}", file=sys.stderr)
         return 2
 
     env = os.environ.copy()
-    if "STANC3" not in env:
-        default_stanc3 = cmdstan_home.parent / "stanc3"
-        if default_stanc3.exists():
-            env["STANC3"] = str(default_stanc3.resolve())
-        else:
-            print(
-                "STANC3 is not set and ../stanc3 was not found. "
-                "Set STANC3 to your SafeStan stanc3 checkout.",
-                file=sys.stderr,
-            )
-            return 2
+    env.setdefault("STANC3", "safestan")
 
-    with tempfile.TemporaryDirectory(prefix="cmdsafestan-good-") as tmp:
-        tmp_model = Path(tmp) / model_template.name
-        shutil.copy2(model_template, tmp_model)
-        cmd = [str(cmdsafestan), "--sstan-protect", "y", str(tmp_model)]
-        run = subprocess.run(
-            cmd,
-            cwd=cmdstan_home,
-            env=env,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        sys.stdout.write(run.stdout)
-        sys.stderr.write(run.stderr)
+    if generated_hpp.exists():
+        generated_hpp.unlink()
 
-        if run.returncode != 0:
-            print(f"Expected success, got return code {run.returncode}", file=sys.stderr)
-            return 1
+    cmd = [
+        "cmdsafestan",
+        "--target",
+        "hpp",
+        "--sstan-protect",
+        "y",
+        str(model),
+    ]
+    run = subprocess.run(
+        cmd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    sys.stdout.write(run.stdout)
+    sys.stderr.write(run.stderr)
 
-        generated_hpp = tmp_model.with_suffix(".hpp")
-        if not generated_hpp.exists():
-            print(f"Expected generated header at {generated_hpp}", file=sys.stderr)
-            return 1
+    if run.returncode != 0:
+        print(f"Expected success, got return code {run.returncode}", file=sys.stderr)
+        return 1
+
+    if not generated_hpp.exists():
+        print(f"Expected generated header at {generated_hpp}", file=sys.stderr)
+        return 1
+
+    generated_hpp.unlink()
 
     print("PASS: cmdsafestan compiled the valid model.")
     return 0

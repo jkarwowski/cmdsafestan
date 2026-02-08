@@ -10,12 +10,13 @@ notes), see:
 
 ## What Is Added Here
 
-- `cmdsafestan`: a thin wrapper around `make` that always passes:
+- `cmdsafestan`: a CmdStan-style CLI wrapper around `make` that always passes:
   - `--sstanc`
   - `--sstan-protect=<vars>`
-- local `stanc3` integration via `STANC3=...` (for your SafeStan-enabled
+- local compiler integration via `STANC3=...` (for your SafeStan-enabled
   `stanc3` checkout)
 - two Python smoke tests for one valid and one invalid SafeStan model
+- optional `safestan` submodule pointing at `jkarwowski/safestanc3` (`master`)
 
 ## Local SafeStan stanc3
 
@@ -25,48 +26,78 @@ that is the intended path.
 In `make/local`:
 
 ```make
-STANC3=../stanc3
+STANC3=safestan
+```
+
+Or initialize the bundled `safestan` submodule:
+
+```bash
+git submodule update --init --remote safestan
+```
+
+then in `make/local`:
+
+```make
+STANC3=safestan
 ```
 
 Or per-command:
 
 ```bash
-STANC3=../stanc3 make path/to/model.hpp
+STANC3=safestan make path/to/model.hpp
+```
+
+If `dune` is not directly on your `PATH`, local compiler builds can use:
+
+```bash
+opam exec -- dune build @install
 ```
 
 ## Using `cmdsafestan`
 
-Translate model to C++ header (`.hpp`, default):
+Install with uv (editable/project install):
 
 ```bash
-./cmdsafestan --sstan-protect y path/to/model.stan
+uv sync
 ```
 
-Build full model executable:
+(`uv.lock` pins this project as `source = { editable = "." }`.)
+
+Then run like normal CmdStan from `cmdstan/`:
+
+(`cmdsafestan` defaults to `STANC3=safestan`; override with `--stanc3` or
+environment variable `STANC3`.)
+
+Build model executable (default target):
 
 ```bash
-./cmdsafestan --target exe --sstan-protect y path/to/model.stan
+uv run cmdsafestan --sstan-protect y path/to/model.stan
+```
+
+Translate only to C++ header (`.hpp`):
+
+```bash
+uv run cmdsafestan --target hpp --sstan-protect y path/to/model.stan
 ```
 
 Use an explicit local SafeStan compiler checkout:
 
 ```bash
-./cmdsafestan --stanc3 ../stanc3 --sstan-protect y path/to/model.stan
+uv run cmdsafestan --stanc3 safestan --sstan-protect y path/to/model.stan
 ```
 
 Add extra stanc flags:
 
 ```bash
-./cmdsafestan --sstan-protect y --stancflag=--warn-pedantic path/to/model.stan
+uv run cmdsafestan --sstan-protect y --stancflag=--warn-pedantic path/to/model.stan
 ```
 
 ## Python Smoke Tests (uv-managed)
 
-This directory now includes `pyproject.toml` so tests can be run through `uv`.
-
 From `cmdstan/`:
 
 ```bash
+uv sync
 uv run --project . python tests/safestan/test_cmdsafestan_good.py
 uv run --project . python tests/safestan/test_cmdsafestan_bad.py
 ```
