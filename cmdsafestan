@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Compile Stan models through CmdStan with SafeStan defaults."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import platform
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run CmdStan make with SafeStan flags enabled "
+            "(--sstanc and --sstan-protect)."
+        )
+    )
+    parser.add_argument("model", help="Path to a .stan model file.")
+    parser.add_argument(
+        "--sstan-protect",
+        required=True,
+        help="Comma-separated top-level data variables to protect.",
+    )
+    parser.add_argument(
+        "--target",
+        default="hpp",
+        choices=("hpp", "exe"),
+        help="Build target: .hpp translation only (default) or model executable.",
+    )
+    parser.add_argument(
+        "--stanc3",
+        default=os.environ.get("STANC3"),
+        help="Path to local stanc3 checkout (optional, defaults to STANC3 env var).",
+    )
+    parser.add_argument(
+        "--stancflag",
+        action="append",
+        default=[],
+        help="Extra stanc flag. Repeat to pass multiple values.",
+    )
+    parser.add_argument(
+        "--make-arg",
+        action="append",
+        default=[],
+        help="Extra make argument. Repeat to pass multiple values.",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        help="Pass -jN to make.",
+    )
+    parser.add_argument(
+        "--cmdstan-home",
+        default=str(Path(__file__).resolve().parent),
+        help="Path to CmdStan root (defaults to this script directory).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the make command and exit without running it.",
+    )
+    return parser.parse_args()
+
+
+def resolve_path(path_str: str, *, base: Path | None = None) -> Path:
+    path = Path(path_str).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    origin = base if base is not None else Path.cwd()
+    return (origin / path).resolve()
+
+
+def model_target(model_path: Path, target: str) -> Path:
+    if target == "hpp":
+        return model_path.with_suffix(".hpp")
+    exe_suffix = ".exe" if platform.system() == "Windows" else ""
+    return model_path.with_suffix(exe_suffix)
+
+
+def main() -> int:
+    args = parse_args()
+
+    cmdstan_home = resolve_path(args.cmdstan_home)
+    if not cmdstan_home.exists():
+        print(f"cmdsafestan: cmdstan home does not exist: {cmdstan_home}", file=sys.stderr)
+        return 2
+
+    model_path = resolve_path(args.model)
+    if model_path.suffix != ".stan":
+        print(f"cmdsafestan: model must end with .stan: {model_path}", file=sys.stderr)
+        return 2
+    if not model_path.exists():
+        print(f"cmdsafestan: model does not exist: {model_path}", file=sys.stderr)
+        return 2
+
+    stanc3_path = None
+    if args.stanc3:
+        stanc3_path = resolve_path(args.stanc3)
+        if not stanc3_path.exists():
+            print(f"cmdsafestan: STANC3 path does not exist: {stanc3_path}", file=sys.stderr)
+            return 2
+
+    stancflags = []
+    existing_flags = os.environ.get("STANCFLAGS", "").strip()
+    if existing_flags:
+        stancflags.append(existing_flags)
+    stancflags.append("--sstanc")
+    stancflags.append(f"--sstan-protect={args.sstan_protect}")
+    stancflags.extend([flag for flag in args.stancflag if flag.strip()])
+
+    env = os.environ.copy()
+    env["STANCFLAGS"] = " ".join(stancflags)
+    if stanc3_path is not None:
+        env["STANC3"] = str(stanc3_path)
+
+    target_path = model_target(model_path, args.target)
+    make_cmd = ["make"]
+    if args.jobs is not None:
+        if args.jobs < 1:
+            print("cmdsafestan: --jobs must be >= 1", file=sys.stderr)
+            return 2
+        make_cmd.append(f"-j{args.jobs}")
+    make_cmd.extend(args.make_arg)
+    make_cmd.append(str(target_path))
+
+    print(f"[cmdsafestan] cmdstan_home={cmdstan_home}")
+    if "STANC3" in env:
+        print(f"[cmdsafestan] STANC3={env['STANC3']}")
+    print(f"[cmdsafestan] STANCFLAGS={env['STANCFLAGS']}")
+    print(f"[cmdsafestan] {' '.join(shlex.quote(part) for part in make_cmd)}")
+
+    if args.dry_run:
+        return 0
+
+    result = subprocess.run(make_cmd, cwd=cmdstan_home, env=env, check=False)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

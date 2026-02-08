@@ -1,0 +1,10 @@
+[project]
+name = "cmdstan-safestan-tests"
+version = "0.1.0"
+description = "SafeStan-oriented CmdStan Python scripts."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.uv]
+package = false

@@ -44,7 +44,15 @@ ifneq ($(STANC3),)
   # build stanc3 from local installation
   bin/stanc$(EXE) : $(call findfiles,$(STANC3)/src/,*.ml*) $(STANC#)
 	@mkdir -p $(dir $@)
-	cd $(STANC3) && echo "--- Rebuilding stanc ---\n" && dune build @install
+	@if command -v dune >/dev/null 2>&1; then \
+		cd $(STANC3) && echo "--- Rebuilding stanc ---\n" && dune build @install; \
+	elif test -f $(STANC3)/_build/default/src/stanc/stanc.exe; then \
+		echo "--- Using existing stanc binary at $(STANC3)/_build/default/src/stanc/stanc.exe ---"; \
+	else \
+		echo "ERROR: dune was not found and no prebuilt local stanc binary exists."; \
+		echo "Either install dune or build stanc once in $(STANC3)."; \
+		exit 1; \
+	fi
 	test -f $(STANC3)/_build/default/src/stanc/stanc.exe && rm -f $@ && cp $(STANC3)/_build/default/src/stanc/stanc.exe $@ || exit 1
 else ifneq ($(STANC3_TEST_BIN_URL),)
 # download stanc3 build from specific branch
