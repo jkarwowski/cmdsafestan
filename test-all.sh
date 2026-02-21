@@ -8,8 +8,8 @@ fi
 
 echo 'Running:'
 echo '  - CmdStan tests'
-echo '  - Stan tests'
-echo '  - Stan Math Library tests'
+echo '  - SafeStan tests'
+echo '  - SafeStan Math Library tests'
 echo ''
 echo '------------------------------------------------------------'
 echo 'CmdStan tests'
@@ -18,16 +18,16 @@ echo 'CmdStan tests'
 
 echo ''
 echo '------------------------------------------------------------'
-echo 'Stan tests'
-pushd stan/
+echo 'SafeStan tests'
+pushd safestan/
 ./runTests.py $RUNTESTARGS src/test
 popd
 
 
 echo ''
 echo '------------------------------------------------------------'
-echo 'Stan Math Library tests'
-pushd stan/lib/stan_math/
+echo 'SafeStan Math Library tests'
+pushd safestan/lib/stan_math/
 ./runTests.py $RUNTESTARGS test/unit
 ./runTests.py $RUNTESTARGS test/prob
 popd

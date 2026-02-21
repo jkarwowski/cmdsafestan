@@ -76,10 +76,10 @@ pipeline {
             steps {
                 retry(3) { checkout scm }
                 sh 'git clean -xffd'
-                sh 'make stan-revert'
+                sh 'make safestan-revert'
                 script {
-                    utils.checkout_pr("stan", "stan", params.stan_pr)
-                    utils.checkout_pr("math", "stan/lib/stan_math", params.math_pr)
+                    utils.checkout_pr("stan", "safestan", params.stan_pr)
+                    utils.checkout_pr("math", "safestan/lib/stan_math", params.math_pr)
                 }
 
                 stash 'CmdStanSetup'
@@ -181,7 +181,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('stan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [
@@ -222,7 +222,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('stan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [
@@ -255,7 +255,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('stan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [

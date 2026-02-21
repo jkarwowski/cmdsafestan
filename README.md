@@ -13,6 +13,7 @@ notes), see:
 - `cmdsafestan`: a CmdStan-style CLI wrapper around `make` that always passes:
   - `--sstanc`
   - `--sstan-protect=<vars>`
+- `safestan` is the only supported module path in this fork (`stan` submodule is not used)
 - local compiler integration via `STANC3=...` (for your SafeStan-enabled
   `stanc3` checkout)
 - two Python smoke tests for one valid and one invalid SafeStan model

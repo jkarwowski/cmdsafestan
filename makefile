@@ -19,7 +19,7 @@ help:
 
 -include make/local                       # user-defined variables
 
-STAN ?= stan/
+STAN ?= safestan/
 MATH ?= $(STAN)lib/stan_math/
 RAPIDJSON ?= $(STAN)lib/rapidjson_1.1.0/
 CLI11 ?= lib/CLI11-1.9.1/
@@ -140,15 +140,52 @@ else
 PRECOMPILED_MODEL_HEADER=
 endif
 
-include $(MATH)make/compiler_flags
-include $(MATH)make/dependencies
-include $(MATH)make/libraries
+STAN_MATH_MAKEFILES := \
+	$(MATH)make/compiler_flags \
+	$(MATH)make/dependencies \
+	$(MATH)make/libraries
+
+ifneq ($(and \
+	$(wildcard $(word 1,$(STAN_MATH_MAKEFILES))), \
+	$(wildcard $(word 2,$(STAN_MATH_MAKEFILES))), \
+	$(wildcard $(word 3,$(STAN_MATH_MAKEFILES)))),)
+include $(word 1,$(STAN_MATH_MAKEFILES))
+include $(word 2,$(STAN_MATH_MAKEFILES))
+include $(word 3,$(STAN_MATH_MAKEFILES))
+STAN_MATH_AVAILABLE := true
+else
+STAN_MATH_AVAILABLE := false
+SUNDIALS_TARGETS :=
+MPI_TARGETS :=
+TBB_TARGETS :=
+.PHONY: clean-libraries
+clean-libraries:
+	@:
+endif
 include make/stanc
 include make/program
 include make/tests
 include make/command
 
 CMDSTAN_VERSION := 2.38.0
+
+# hpp-only or compiler-only goals do not need CmdStan core object deps.
+SKIP_MAIN_D_GOALS := $(filter %.hpp bin/stanc$(EXE) help help-dev print-% compile_info,$(MAKECMDGOALS))
+ifneq ($(MAKECMDGOALS),)
+ifneq ($(words $(MAKECMDGOALS)),$(words $(SKIP_MAIN_D_GOALS)))
+SKIP_MAIN_D_INCLUDE := false
+else
+SKIP_MAIN_D_INCLUDE := true
+endif
+endif
+
+STAN_MATH_OPTIONAL_GOALS := %.hpp bin/stanc$(EXE) help help-dev print-% compile_info clean%
+STAN_MATH_REQUIRED_GOALS := $(filter-out $(STAN_MATH_OPTIONAL_GOALS),$(MAKECMDGOALS))
+ifneq ($(STAN_MATH_REQUIRED_GOALS),)
+ifeq ($(STAN_MATH_AVAILABLE),false)
+$(error Missing SafeStan submodule components at $(MATH). Run `git submodule update --init --recursive safestan` to build non-hpp targets)
+endif
+endif
 
 .PHONY: help
 help:
@@ -227,16 +264,16 @@ help-dev:
 	@echo ''
 	@echo '  If this copy of CmdStan has been cloned using git,'
 	@echo '  before building CmdStan utilities the first time you need'
-	@echo '  to initialize the Stan repository with:'
-	@echo '     make stan-update'
+	@echo '  to initialize the SafeStan repository with:'
+	@echo '     make safestan-update'
 	@echo ''
 	@echo ''
 	@echo 'Developer relevant targets:'
-	@echo '  Stan management targets:'
-	@echo '  - stan-update    : Initializes and updates the Stan repository'
-	@echo '  - stan-update/*  : Updates the Stan repository to the specified'
+	@echo '  SafeStan management targets:'
+	@echo '  - safestan-update    : Initializes and updates the SafeStan repository'
+	@echo '  - safestan-update/*  : Updates the SafeStan repository to the specified'
 	@echo '                     branch or commit hash.'
-	@echo '  - stan-revert    : Reverts changes made to Stan library back to'
+	@echo '  - safestan-revert    : Reverts changes made to the SafeStan library back to'
 	@echo '                     what is in the repository.'
 	@echo ''
 	@echo 'Model related:'
@@ -259,7 +296,9 @@ build-mpi: $(MPI_TARGETS)
 # but otherwise, we always want to check main.d
 ifneq ($(MAKECMDGOALS),)
 ifeq ($(filter clean%,$(MAKECMDGOALS)),)
+ifneq ($(SKIP_MAIN_D_INCLUDE),true)
 include src/cmdstan/main.d
+endif
 endif
 endif
 
@@ -309,19 +348,19 @@ clean-all: clean clean-deps clean-libraries
 # Submodule related tasks
 ##
 
-.PHONY: stan-update
-stan-update :
-	git submodule update --init --recursive
+.PHONY: safestan-update
+safestan-update :
+	git submodule update --init --recursive safestan
 
-stan-update/%: stan-update
-	cd stan && git fetch --all && git checkout $* && git pull
+safestan-update/%: safestan-update
+	cd safestan && git fetch --all && git checkout $* && git pull
 
-stan-pr/%: stan-update
-	cd stan && git reset --hard origin/develop && git checkout $* && git checkout develop && git merge $* --ff --no-edit --strategy=ours
+safestan-pr/%: safestan-update
+	cd safestan && git reset --hard origin/develop && git checkout $* && git checkout develop && git merge $* --ff --no-edit --strategy=ours
 
-.PHONY: stan-revert
-stan-revert:
-	git submodule update --init --recursive
+.PHONY: safestan-revert
+safestan-revert:
+	git submodule update --init --recursive safestan
 
 ##
 # Debug target that prints compile command for CmdStan executable
@@ -339,20 +378,3 @@ print-%  : ; @echo $* = $($*)
 
 .PHONY: clean-build
 clean-build: clean-all build
-
-
-##
-# This is only run if the `include` statements earlier fail to find a file.
-# We assume that means the submodule is missing
-##
-$(MATH)make/% :
-	@echo 'ERROR: Missing Stan submodules.'
-	@echo 'We tried to find the Stan Math submodule at:'
-	@echo '  $(MATH)'
-	@echo ''
-	@echo 'The most likely source of the problem is CmdStan was cloned without'
-	@echo 'the --recursive flag.  To fix this, run the following command:'
-	@echo '  git submodule update --init --recursive'
-	@echo ''
-	@echo 'And try building again'
-	@exit 1

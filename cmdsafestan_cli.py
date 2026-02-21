@@ -7,6 +7,7 @@ import argparse
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -119,13 +120,62 @@ def main(argv: list[str] | None = None) -> int:
     command.extend(args.make_arg)
     command.append(make_target(args.model, args.target))
 
+    # Ensure bin/stanc is refreshed from local STANC3, even if a stale binary exists.
+    stanc_target = os.path.join(
+        "bin", f"stanc{'.exe' if platform.system() == 'Windows' else ''}"
+    )
+    stanc_copy_source = None
+    stanc_bootstrap_command = None
+    if args.stanc3:
+        local_stanc = os.path.join(
+            args.stanc3,
+            "_build",
+            "default",
+            "src",
+            "stanc",
+            "stanc.exe",
+        )
+        if os.path.isfile(local_stanc):
+            stanc_copy_source = local_stanc
+        else:
+            stanc_bootstrap_command = ["make"]
+            if args.jobs is not None:
+                stanc_bootstrap_command.append(f"-j{args.jobs}")
+            stanc_bootstrap_command.extend(args.make_arg)
+            stanc_bootstrap_command.append("-B")
+            stanc_bootstrap_command.append("bin/stanc")
+
     if "STANC3" in env:
         print(f"[cmdsafestan] STANC3={env['STANC3']}")
     print(f"[cmdsafestan] STANCFLAGS={env['STANCFLAGS']}")
+    if stanc_copy_source is not None:
+        print(f"[cmdsafestan] sync {stanc_target} from {stanc_copy_source}")
+    if stanc_bootstrap_command is not None:
+        print(
+            "[cmdsafestan] "
+            + " ".join(shlex.quote(part) for part in stanc_bootstrap_command)
+        )
     print(f"[cmdsafestan] {' '.join(shlex.quote(part) for part in command)}")
 
     if args.dry_run:
         return 0
+
+    if stanc_copy_source is not None:
+        os.makedirs(os.path.dirname(stanc_target), exist_ok=True)
+        stanc_tmp_target = f"{stanc_target}.tmp.{os.getpid()}"
+        shutil.copy2(stanc_copy_source, stanc_tmp_target)
+        if platform.system() != "Windows":
+            os.chmod(stanc_tmp_target, os.stat(stanc_tmp_target).st_mode | 0o111)
+        os.replace(stanc_tmp_target, stanc_target)
+
+    if stanc_bootstrap_command is not None:
+        bootstrap_result = subprocess.run(
+            stanc_bootstrap_command,
+            env=env,
+            check=False,
+        )
+        if bootstrap_result.returncode != 0:
+            return bootstrap_result.returncode
 
     result = subprocess.run(command, env=env, check=False)
     return result.returncode
