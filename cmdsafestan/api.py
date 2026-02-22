@@ -12,7 +12,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+import time
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -29,6 +30,7 @@ class SafeStanResult:
     runtime_ready: bool
     run_returncode: int | None
     run_output: str
+    timings_seconds: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -328,6 +330,8 @@ def evaluate_model_string(
     use_no_stanc_sync = runtime.no_stanc_sync if no_stanc_sync is None else no_stanc_sync
     missing_runtime = _missing_runtime_paths(runtime)
     runtime_ready = not missing_runtime
+    total_start = time.perf_counter()
+    timings_seconds: dict[str, float] = {}
 
     with tempfile.TemporaryDirectory(prefix="cmdsafestan-api-", dir=runtime.tmp_root) as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -336,8 +340,10 @@ def evaluate_model_string(
         output_csv = tmp_path / "output.csv"
         model_exe = tmp_path / f"model{'.exe' if platform.system() == 'Windows' else ''}"
 
+        write_start = time.perf_counter()
         model_path.write_text(model_code, encoding="utf-8")
         data_path.write_text(json.dumps(data), encoding="utf-8")
+        timings_seconds["write_inputs"] = time.perf_counter() - write_start
 
         compile_cmd = _cmdsafestan_command(
             runtime=runtime,
@@ -347,14 +353,17 @@ def evaluate_model_string(
             no_stanc_sync=use_no_stanc_sync,
             jobs=jobs,
         )
+        compile_hpp_start = time.perf_counter()
         compile_rc, compile_output = _run_command(
             compile_cmd,
             cwd=runtime.cmdstan_root,
             env=env,
             stream_output=stream_output,
         )
+        timings_seconds["compile_hpp"] = time.perf_counter() - compile_hpp_start
         violation = _extract_violation(compile_output)
         if compile_rc != 0:
+            timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=False,
                 log_likelihood=None,
@@ -364,9 +373,11 @@ def evaluate_model_string(
                 runtime_ready=runtime_ready,
                 run_returncode=None,
                 run_output="",
+                timings_seconds=timings_seconds,
             )
 
         if not runtime_ready:
+            timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=True,
                 log_likelihood=None,
@@ -379,6 +390,7 @@ def evaluate_model_string(
                     "Runtime unavailable: missing required runtime paths: "
                     + ", ".join(missing_runtime)
                 ),
+                timings_seconds=timings_seconds,
             )
 
         exe_build_cmd = _cmdsafestan_command(
@@ -389,13 +401,16 @@ def evaluate_model_string(
             no_stanc_sync=use_no_stanc_sync,
             jobs=jobs,
         )
+        compile_exe_start = time.perf_counter()
         exe_build_rc, exe_build_output = _run_command(
             exe_build_cmd,
             cwd=runtime.cmdstan_root,
             env=env,
             stream_output=stream_output,
         )
+        timings_seconds["compile_exe"] = time.perf_counter() - compile_exe_start
         if exe_build_rc != 0:
+            timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=True,
                 log_likelihood=None,
@@ -405,6 +420,7 @@ def evaluate_model_string(
                 runtime_ready=True,
                 run_returncode=exe_build_rc,
                 run_output=exe_build_output,
+                timings_seconds=timings_seconds,
             )
 
         run_cmd = [
@@ -422,13 +438,16 @@ def evaluate_model_string(
             f"file={output_csv}",
             "refresh=0",
         ]
+        run_start = time.perf_counter()
         run_rc, run_output = _run_command(
             run_cmd,
             cwd=runtime.cmdstan_root,
             env=env,
             stream_output=stream_output,
         )
+        timings_seconds["run_sample"] = time.perf_counter() - run_start
         lp_value = _extract_lp(output_csv) if run_rc == 0 else None
+        timings_seconds["total"] = time.perf_counter() - total_start
 
         return SafeStanResult(
             safe=True,
@@ -439,6 +458,7 @@ def evaluate_model_string(
             runtime_ready=True,
             run_returncode=run_rc,
             run_output=run_output,
+            timings_seconds=timings_seconds,
         )
 
 

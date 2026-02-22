@@ -12,6 +12,14 @@ from typing import Any
 
 from cmdsafestan.api import SafeStanResult, evaluate_model_string, init
 
+_STAGE_ORDER = (
+    "write_inputs",
+    "compile_hpp",
+    "compile_exe",
+    "run_sample",
+    "total",
+)
+
 SAFE_MODEL = """
 data {
   int<lower=0, upper=1> y;
@@ -61,6 +69,31 @@ def _summary(values: list[float]) -> dict[str, float | int]:
     }
 
 
+def _append_stage_samples(
+    samples: dict[str, list[float]], result: SafeStanResult
+) -> None:
+    for stage_name, seconds in result.timings_seconds.items():
+        samples.setdefault(stage_name, []).append(seconds)
+
+
+def _summarize_stage_samples(
+    samples: dict[str, list[float]]
+) -> dict[str, dict[str, float | int]]:
+    ordered_names = [stage for stage in _STAGE_ORDER if stage in samples]
+    extra_names = sorted(name for name in samples if name not in _STAGE_ORDER)
+    return {name: _summary(samples[name]) for name in ordered_names + extra_names}
+
+
+def _format_stage_timings(timings_seconds: dict[str, float]) -> str:
+    ordered_names = [stage for stage in _STAGE_ORDER if stage in timings_seconds]
+    extra_names = sorted(name for name in timings_seconds if name not in _STAGE_ORDER)
+    parts = [
+        f"{stage}={timings_seconds[stage]:.3f}s"
+        for stage in ordered_names + extra_names
+    ]
+    return " ".join(parts)
+
+
 def _run_and_time(
     model_name: str,
     model_code: str,
@@ -101,6 +134,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     init_times: list[float] = []
     safe_times: list[float] = []
     unsafe_times: list[float] = []
+    safe_stage_samples: dict[str, list[float]] = {}
+    unsafe_stage_samples: dict[str, list[float]] = {}
     bootstrap_seconds: float | None = None
 
     if args.bootstrap_first:
@@ -139,6 +174,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             stream_output=args.stream_output,
         )
         safe_times.append(safe_elapsed)
+        _append_stage_samples(safe_stage_samples, safe_result)
 
         unsafe_elapsed, unsafe_result = _run_and_time(
             "unsafe",
@@ -151,13 +187,16 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             stream_output=args.stream_output,
         )
         unsafe_times.append(unsafe_elapsed)
+        _append_stage_samples(unsafe_stage_samples, unsafe_result)
 
         if args.verbose:
             print(
                 f"run={i + 1}/{args.runs} "
                 f"init={init_times[-1]:.3f}s "
                 f"safe={safe_elapsed:.3f}s(lp={safe_result.log_likelihood}) "
-                f"unsafe={unsafe_elapsed:.3f}s(violation={unsafe_result.violation})"
+                f"unsafe={unsafe_elapsed:.3f}s(violation={unsafe_result.violation})\n"
+                f"  safe stages: {_format_stage_timings(safe_result.timings_seconds)}\n"
+                f"  unsafe stages: {_format_stage_timings(unsafe_result.timings_seconds)}"
             )
 
     benchmark = {
@@ -178,6 +217,10 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "per_model": {
             "safe": _summary(safe_times),
             "unsafe": _summary(unsafe_times),
+        },
+        "per_stage": {
+            "safe": _summarize_stage_samples(safe_stage_samples),
+            "unsafe": _summarize_stage_samples(unsafe_stage_samples),
         },
     }
 
@@ -269,6 +312,13 @@ def main() -> int:
                 f"min={stats['min_seconds']:.3f}s "
                 f"max={stats['max_seconds']:.3f}s"
             )
+            stage_stats = benchmark["per_stage"][model_name]
+            if stage_stats:
+                stage_parts = [
+                    f"{stage_name}={stage_data['mean_seconds']:.3f}s"
+                    for stage_name, stage_data in stage_stats.items()
+                ]
+                print(f"  stage mean [{model_name}]: {' '.join(stage_parts)}")
 
         print()
 
