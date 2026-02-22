@@ -1,4 +1,4 @@
-from cmdsafestan_api import evaluate_model_string, init
+from cmdsafestan.api import evaluate_model_string, init
 
 SAFE_MODEL = """
 data {

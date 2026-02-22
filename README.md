@@ -45,7 +45,7 @@ uv run cmdsafestan --target hpp --sstan-protect y tests/safestan/models/good_ber
 ## Python API (self-contained safe/unsafe example)
 
 ```python
-from cmdsafestan_api import evaluate_model_string, init
+from cmdsafestan.api import evaluate_model_string, init
 
 SAFE_MODEL = """
 data { int<lower=0, upper=1> y; }
@@ -104,5 +104,18 @@ Behavior notes:
 - `evaluate_model_string` uses a unique temporary directory per call for model/data/output files, so concurrent workers do not share per-model artifacts.
 - `init(..., bootstrap=True)` makes later calls faster by reusing shared built dependencies and skipping repeated global `bin/stanc` sync.
 - Default temp root after `init` is `.cmdsafestan-tmp/` under repo root (override with `tmp_root=...` in `init`).
+
+## Benchmark (10 runs, split per-init and per-model)
+
+```bash
+uv run --project . python scripts/benchmark/benchmark_api.py --runs 10
+```
+
+This reports:
+
+- per-run `init(...)` timing (`per_init`)
+- per-run safe-model timing (`per_model.safe`)
+- per-run unsafe-model timing (`per_model.unsafe`)
+- optional one-time bootstrap timing (`--bootstrap-first`)
 
 See runnable scripts in `examples/python/example.py` and `examples/python/example_good.py`.

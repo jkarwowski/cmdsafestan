@@ -11,11 +11,11 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-cmdsafestan = "cmdsafestan_cli:main"
-cmdsafestan-api = "cmdsafestan_api:main"
+cmdsafestan = "cmdsafestan.cli:main"
+cmdsafestan-api = "cmdsafestan.api:main"
 
 [tool.setuptools]
-py-modules = ["cmdsafestan_api", "cmdsafestan_cli"]
+packages = ["cmdsafestan"]
 
 [tool.uv]
 package = true

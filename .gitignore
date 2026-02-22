@@ -15,6 +15,7 @@
 /tests/safestan/models/good_bernoulli.exe
 /.cmdsafestan-tmp/
 /cmdsafestan-api-*/
+/cmdsafestan.egg-info/
 
 # main intermediate
 src/cmdstan/main*.o

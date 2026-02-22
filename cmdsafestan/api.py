@@ -218,7 +218,7 @@ def _cmdsafestan_command(
     no_stanc_sync: bool,
     jobs: int | None,
 ) -> list[str]:
-    command = [sys.executable, "-m", "cmdsafestan_cli"]
+    command = [sys.executable, "-m", "cmdsafestan.cli"]
     if target is not None:
         command.extend(["--target", target])
     if jobs is not None:
