@@ -91,6 +91,31 @@ def main() -> int:
         print("Unsafe model should not produce lp__.", file=sys.stderr)
         return 1
 
+    # Plain mode should compile/run through the same wrapper path without
+    # SafeStan enforcement.
+    plain_result = evaluate_model_string(
+        UNSAFE_MODEL,
+        {"y": 1},
+        protect=["y"],
+        runtime=runtime,
+        enforce_safety=False,
+    )
+    if plain_result.safety_enforced:
+        print("Expected plain_result.safety_enforced=False.", file=sys.stderr)
+        return 1
+    if not plain_result.safe:
+        print("Expected plain mode compile to succeed for UNSAFE_MODEL.", file=sys.stderr)
+        print(plain_result.compile_output, file=sys.stderr)
+        return 1
+    if plain_result.runtime_ready:
+        if plain_result.run_returncode != 0:
+            print("Expected plain mode run to succeed.", file=sys.stderr)
+            print(plain_result.run_output, file=sys.stderr)
+            return 1
+        if plain_result.log_likelihood is None or not math.isfinite(plain_result.log_likelihood):
+            print("Expected finite lp__ for plain mode run.", file=sys.stderr)
+            return 1
+
     print("PASS: evaluate_model_string reports safe/unsafe status and lp__.")
     return 0
 

@@ -12,6 +12,27 @@ import subprocess
 import sys
 
 
+def _strip_safestan_flags(stancflags: str) -> str:
+    if not stancflags.strip():
+        return ""
+    tokens = shlex.split(stancflags)
+    kept: list[str] = []
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if token == "--sstanc":
+            continue
+        if token == "--sstan-protect":
+            skip_next = True
+            continue
+        if token.startswith("--sstan-protect="):
+            continue
+        kept.append(token)
+    return " ".join(kept)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -28,8 +49,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--sstan-protect",
-        required=True,
-        help="Comma-separated top-level data variables to protect.",
+        default=None,
+        help="Comma-separated top-level data variables to protect (required in safestan mode).",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("safestan", "plain"),
+        default="safestan",
+        help="Compile mode: `safestan` enforces static checks, `plain` disables them.",
     )
     parser.add_argument(
         "--target",
@@ -109,14 +136,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.jobs is not None and args.jobs < 1:
         print("cmdsafestan: --jobs must be >= 1", file=sys.stderr)
         return 2
+    if args.mode == "safestan" and not args.sstan_protect:
+        print("cmdsafestan: --sstan-protect is required when --mode=safestan", file=sys.stderr)
+        return 2
 
     env = os.environ.copy()
     flags: list[str] = []
     existing = env.get("STANCFLAGS", "").strip()
+    if args.mode == "plain":
+        existing = _strip_safestan_flags(existing)
     if existing:
         flags.append(existing)
-    flags.append("--sstanc")
-    flags.append(f"--sstan-protect={args.sstan_protect}")
+    if args.mode == "safestan":
+        flags.append("--sstanc")
+        flags.append(f"--sstan-protect={args.sstan_protect}")
     flags.extend([f.strip() for f in args.stancflag if f and f.strip()])
     env["STANCFLAGS"] = " ".join(flags)
     if args.stanc3:
@@ -155,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if "STANC3" in env:
         print(f"[cmdsafestan] STANC3={env['STANC3']}")
+    print(f"[cmdsafestan] MODE={args.mode}")
     print(f"[cmdsafestan] STANCFLAGS={env['STANCFLAGS']}")
     if stanc_copy_source is not None:
         print(f"[cmdsafestan] sync {stanc_target} from {stanc_copy_source}")

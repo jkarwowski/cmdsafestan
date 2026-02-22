@@ -23,6 +23,7 @@ class SafeStanResult:
     """Result for compile + optional run of a model string."""
 
     safe: bool
+    safety_enforced: bool
     log_likelihood: float | None
     compile_returncode: int
     compile_output: str
@@ -215,27 +216,26 @@ def _cmdsafestan_command(
     *,
     runtime: SafeStanRuntime,
     model_path: Path,
-    protect_value: str,
+    protect_value: str | None,
+    enforce_safety: bool,
     target: str | None,
     no_stanc_sync: bool,
     jobs: int | None,
 ) -> list[str]:
     command = [sys.executable, "-m", "cmdsafestan.cli"]
+    command.extend(["--mode", "safestan" if enforce_safety else "plain"])
     if target is not None:
         command.extend(["--target", target])
     if jobs is not None:
         command.extend(["--jobs", str(jobs)])
     if no_stanc_sync:
         command.append("--no-stanc-sync")
-    command.extend(
-        [
-            "--stanc3",
-            runtime.stanc3,
-            "--sstan-protect",
-            protect_value,
-            str(model_path),
-        ]
-    )
+    command.extend(["--stanc3", runtime.stanc3])
+    if enforce_safety:
+        if not protect_value:
+            raise ValueError("protect_value is required when enforce_safety=True")
+        command.extend(["--sstan-protect", protect_value])
+    command.append(str(model_path))
     return command
 
 
@@ -308,13 +308,19 @@ def evaluate_model_string(
     stream_output: bool = False,
     jobs: int | None = None,
     no_stanc_sync: bool | None = None,
+    enforce_safety: bool = True,
+    run_sample: bool = True,
 ) -> SafeStanResult:
-    """Compile and run a model string, returning safety + lp__ summary."""
+    """Compile and run a model string, returning safety + lp__ summary.
+
+    Set enforce_safety=False to compile/run in plain CmdStan mode while still
+    using cmdsafestan's wrapper runtime/bootstrapping path.
+    """
 
     if jobs is not None and jobs < 1:
         raise ValueError("jobs must be >= 1")
 
-    protect_value = _normalize_protect(protect)
+    protect_value = _normalize_protect(protect) if enforce_safety else None
     if runtime is None:
         runtime = _resolve_runtime(
             cmdstan_root=cmdstan_root,
@@ -349,6 +355,7 @@ def evaluate_model_string(
             runtime=runtime,
             model_path=model_path,
             protect_value=protect_value,
+            enforce_safety=enforce_safety,
             target="hpp",
             no_stanc_sync=use_no_stanc_sync,
             jobs=jobs,
@@ -361,11 +368,12 @@ def evaluate_model_string(
             stream_output=stream_output,
         )
         timings_seconds["compile_hpp"] = time.perf_counter() - compile_hpp_start
-        violation = _extract_violation(compile_output)
+        violation = _extract_violation(compile_output) if enforce_safety else None
         if compile_rc != 0:
             timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=False,
+                safety_enforced=enforce_safety,
                 log_likelihood=None,
                 compile_returncode=compile_rc,
                 compile_output=compile_output,
@@ -376,10 +384,26 @@ def evaluate_model_string(
                 timings_seconds=timings_seconds,
             )
 
+        if not run_sample:
+            timings_seconds["total"] = time.perf_counter() - total_start
+            return SafeStanResult(
+                safe=True,
+                safety_enforced=enforce_safety,
+                log_likelihood=None,
+                compile_returncode=compile_rc,
+                compile_output=compile_output,
+                violation=violation,
+                runtime_ready=runtime_ready,
+                run_returncode=None,
+                run_output="Run skipped (run_sample=False).",
+                timings_seconds=timings_seconds,
+            )
+
         if not runtime_ready:
             timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=True,
+                safety_enforced=enforce_safety,
                 log_likelihood=None,
                 compile_returncode=compile_rc,
                 compile_output=compile_output,
@@ -397,6 +421,7 @@ def evaluate_model_string(
             runtime=runtime,
             model_path=model_path,
             protect_value=protect_value,
+            enforce_safety=enforce_safety,
             target=None,
             no_stanc_sync=use_no_stanc_sync,
             jobs=jobs,
@@ -413,6 +438,7 @@ def evaluate_model_string(
             timings_seconds["total"] = time.perf_counter() - total_start
             return SafeStanResult(
                 safe=True,
+                safety_enforced=enforce_safety,
                 log_likelihood=None,
                 compile_returncode=compile_rc,
                 compile_output=compile_output,
@@ -451,6 +477,7 @@ def evaluate_model_string(
 
         return SafeStanResult(
             safe=True,
+            safety_enforced=enforce_safety,
             log_likelihood=lp_value,
             compile_returncode=compile_rc,
             compile_output=compile_output,
@@ -470,8 +497,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-file", required=True, help="Path to JSON data file.")
     parser.add_argument(
         "--protect",
-        required=True,
-        help="Comma-separated protected data variables, e.g. y or y,x.",
+        default="y",
+        help=(
+            "Comma-separated protected data variables, e.g. y or y,x. "
+            "Ignored when --no-safety-enforcement is set."
+        ),
     )
     parser.add_argument(
         "--cmdstan-root",
@@ -514,6 +544,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Stream compile/run diagnostics to stdout while executing.",
     )
+    parser.add_argument(
+        "--no-safety-enforcement",
+        action="store_true",
+        help="Compile/run in plain mode (disable SafeStan static enforcement).",
+    )
+    parser.add_argument(
+        "--skip-run",
+        action="store_true",
+        help="Compile only; skip executable build/run stage.",
+    )
     args = parser.parse_args(argv)
 
     model_text = Path(args.model_file).read_text(encoding="utf-8")
@@ -540,6 +580,8 @@ def main(argv: list[str] | None = None) -> int:
         tmp_root=args.tmp_root,
         jobs=args.jobs,
         stream_output=args.stream_output,
+        enforce_safety=not args.no_safety_enforcement,
+        run_sample=not args.skip_run,
     )
     print(json.dumps(asdict(result), indent=2, sort_keys=True))
     return 0 if result.safe else 1

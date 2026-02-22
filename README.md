@@ -42,6 +42,12 @@ Build `.hpp` only:
 uv run cmdsafestan --target hpp --sstan-protect y tests/safestan/models/good_bernoulli.stan
 ```
 
+Compile in plain mode (no SafeStan static enforcement, still uses cmdsafestan bootstrap/sync):
+
+```bash
+uv run cmdsafestan --mode plain --target hpp tests/safestan/models/good_bernoulli.stan
+```
+
 ## Python API (self-contained safe/unsafe example)
 
 ```python
@@ -97,6 +103,17 @@ unsafe_result = evaluate_model_string(
 )
 print("safe?", unsafe_result.safe)              # False
 print("violation:", unsafe_result.violation)    # "SStan violation: ..."
+
+# Plain mode for reward-scoring style runs (no SafeStan enforcement).
+plain_result = evaluate_model_string(
+    UNSAFE_MODEL,
+    data,
+    protect=["y"],              # ignored when enforce_safety=False
+    runtime=runtime,
+    enforce_safety=False,
+)
+print("safe?", plain_result.safe)               # True if compile succeeds
+print("lp__", plain_result.log_likelihood)
 ```
 
 Behavior notes:
@@ -104,6 +121,7 @@ Behavior notes:
 - `evaluate_model_string` uses a unique temporary directory per call for model/data/output files, so concurrent workers do not share per-model artifacts.
 - `init(..., bootstrap=True)` makes later calls faster by reusing shared built dependencies and skipping repeated global `bin/stanc` sync.
 - Default temp root after `init` is `.cmdsafestan-tmp/` under repo root (override with `tmp_root=...` in `init`).
+- Set `enforce_safety=False` to compile/run in plain mode through the same wrapper path.
 
 ## Benchmark
 
