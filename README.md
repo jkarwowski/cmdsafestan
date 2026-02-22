@@ -97,6 +97,7 @@ safe_result = evaluate_model_string(
     data,
     protect=["y"],
     cmdstan_root=".",
+    stream_output=True,  # show build/run diagnostics live
 )
 print("safe?", safe_result.safe)
 print("runtime ready?", safe_result.runtime_ready)
@@ -118,3 +119,4 @@ Notes:
 - `runtime_ready` tells you whether executable run support is available.
 - `log_likelihood` is the run's `lp__` from one sample (quick scalar score) when runtime is available, otherwise `None`.
 - For unsafe models, `safe == False`, `log_likelihood == None`, and `violation` contains `SStan violation: ...`.
+- First call can be slow because it may compile runtime dependencies (SUNDIALS/TBB + model). Use `stream_output=True` to see progress.

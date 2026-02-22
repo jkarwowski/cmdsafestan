@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,42 @@ def _extract_lp(csv_path: Path) -> float | None:
     return None
 
 
+def _run_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    stream_output: bool,
+) -> tuple[int, str]:
+    if not stream_output:
+        run = subprocess.run(
+            command,
+            cwd=cwd,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return run.returncode, run.stdout + run.stderr
+
+    print("[cmdsafestan_api] " + " ".join(shlex.quote(part) for part in command))
+    proc = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    merged_output: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        merged_output.append(line)
+    return proc.wait(), "".join(merged_output)
+
+
 def evaluate_model_string(
     model_code: str,
     data: dict[str, Any],
@@ -79,6 +116,7 @@ def evaluate_model_string(
     stanc3: str = "safestan",
     runtime_root: str | Path = "safestan/stan",
     seed: int = 12345,
+    stream_output: bool = False,
 ) -> SafeStanResult:
     """Compile and run a model string, returning safety + lp__ summary."""
 
@@ -124,21 +162,18 @@ def evaluate_model_string(
             protect_value,
             str(model_path),
         ]
-        compile_run = subprocess.run(
+        compile_rc, compile_output = _run_command(
             compile_cmd,
             cwd=root,
             env=env,
-            text=True,
-            capture_output=True,
-            check=False,
+            stream_output=stream_output,
         )
-        compile_output = compile_run.stdout + compile_run.stderr
         violation = _extract_violation(compile_output)
-        if compile_run.returncode != 0:
+        if compile_rc != 0:
             return SafeStanResult(
                 safe=False,
                 log_likelihood=None,
-                compile_returncode=compile_run.returncode,
+                compile_returncode=compile_rc,
                 compile_output=compile_output,
                 violation=violation,
                 runtime_ready=runtime_ready,
@@ -150,7 +185,7 @@ def evaluate_model_string(
             return SafeStanResult(
                 safe=True,
                 log_likelihood=None,
-                compile_returncode=compile_run.returncode,
+                compile_returncode=compile_rc,
                 compile_output=compile_output,
                 violation=violation,
                 runtime_ready=False,
@@ -171,24 +206,21 @@ def evaluate_model_string(
             protect_value,
             str(model_path),
         ]
-        exe_build_run = subprocess.run(
+        exe_build_rc, exe_build_output = _run_command(
             exe_build_cmd,
             cwd=root,
             env=env,
-            text=True,
-            capture_output=True,
-            check=False,
+            stream_output=stream_output,
         )
-        exe_build_output = exe_build_run.stdout + exe_build_run.stderr
-        if exe_build_run.returncode != 0:
+        if exe_build_rc != 0:
             return SafeStanResult(
                 safe=True,
                 log_likelihood=None,
-                compile_returncode=compile_run.returncode,
+                compile_returncode=compile_rc,
                 compile_output=compile_output,
                 violation=violation,
                 runtime_ready=True,
-                run_returncode=exe_build_run.returncode,
+                run_returncode=exe_build_rc,
                 run_output=exe_build_output,
             )
 
@@ -207,25 +239,22 @@ def evaluate_model_string(
             f"file={output_csv}",
             "refresh=0",
         ]
-        run_proc = subprocess.run(
+        run_rc, run_output = _run_command(
             run_cmd,
             cwd=root,
             env=env,
-            text=True,
-            capture_output=True,
-            check=False,
+            stream_output=stream_output,
         )
-        run_output = run_proc.stdout + run_proc.stderr
-        lp_value = _extract_lp(output_csv) if run_proc.returncode == 0 else None
+        lp_value = _extract_lp(output_csv) if run_rc == 0 else None
 
         return SafeStanResult(
             safe=True,
             log_likelihood=lp_value,
-            compile_returncode=compile_run.returncode,
+            compile_returncode=compile_rc,
             compile_output=compile_output,
             violation=violation,
             runtime_ready=True,
-            run_returncode=run_proc.returncode,
+            run_returncode=run_rc,
             run_output=run_output,
         )
 
@@ -256,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:
         default="safestan/stan",
         help="Runtime root containing src/stan and lib/{stan_math,rapidjson_1.1.0}.",
     )
+    parser.add_argument(
+        "--stream-output",
+        action="store_true",
+        help="Stream compile/run diagnostics to stdout while executing.",
+    )
     args = parser.parse_args(argv)
 
     model_text = Path(args.model_file).read_text(encoding="utf-8")
@@ -267,6 +301,7 @@ def main(argv: list[str] | None = None) -> int:
         cmdstan_root=args.cmdstan_root,
         stanc3=args.stanc3,
         runtime_root=args.runtime_root,
+        stream_output=args.stream_output,
     )
     print(json.dumps(result.__dict__, indent=2, sort_keys=True))
     return 0 if result.safe else 1

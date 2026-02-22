@@ -9,6 +9,10 @@
 
 # built tests
 /test/
+/__pycache__/
+**/__pycache__/
+/tests/safestan/models/good_bernoulli
+/tests/safestan/models/good_bernoulli.exe
 
 # main intermediate
 src/cmdstan/main*.o
