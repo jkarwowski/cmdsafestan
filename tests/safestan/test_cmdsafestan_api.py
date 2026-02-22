@@ -7,7 +7,7 @@ import math
 import sys
 from pathlib import Path
 
-from cmdsafestan_api import evaluate_model_string
+from cmdsafestan_api import evaluate_model_string, init
 
 SAFE_MODEL = """
 data {
@@ -41,12 +41,16 @@ def main() -> int:
     if not Path("makefile").exists():
         print("Run this test from the cmdstan/ root.", file=sys.stderr)
         return 2
+    runtime = init(
+        cmdstan_root=".",
+        bootstrap=False,
+    )
 
     safe_result = evaluate_model_string(
         SAFE_MODEL,
         {"y": 1},
         protect=["y"],
-        cmdstan_root=".",
+        runtime=runtime,
     )
     if not safe_result.safe:
         print("Expected safe model to pass SafeStan compile checks.", file=sys.stderr)
@@ -74,7 +78,7 @@ def main() -> int:
         UNSAFE_MODEL,
         {"y": 1},
         protect=["y"],
-        cmdstan_root=".",
+        runtime=runtime,
     )
     if unsafe_result.safe:
         print("Expected unsafe model to fail SafeStan compile checks.", file=sys.stderr)

@@ -1,4 +1,4 @@
-from cmdsafestan_api import evaluate_model_string
+from cmdsafestan_api import evaluate_model_string, init
 
 SAFE_MODEL = """
 data {
@@ -29,11 +29,22 @@ model {
 
 data = {"y": 1}
 
+# One-time setup (sync stanc + build runtime dependencies).
+# Do this once before launching multiprocessing workers.
+runtime = init(
+    cmdstan_root=".",
+    bootstrap=True,
+    build_runtime=True,
+    jobs=4,
+    stream_output=True,
+)
+
 safe_result = evaluate_model_string(
     SAFE_MODEL,
     data,
     protect=["y"],
-    cmdstan_root=".",
+    runtime=runtime,
+    stream_output=True,
 )
 print("safe?", safe_result.safe)
 print("runtime ready?", safe_result.runtime_ready)
@@ -43,7 +54,7 @@ unsafe_result = evaluate_model_string(
     UNSAFE_MODEL,
     data,
     protect=["y"],
-    cmdstan_root=".",
+    runtime=runtime,
 )
 print("safe?", unsafe_result.safe)
 print("violation:", unsafe_result.violation)

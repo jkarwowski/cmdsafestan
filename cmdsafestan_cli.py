@@ -69,6 +69,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print resolved make command and exit.",
     )
+    parser.add_argument(
+        "--no-stanc-sync",
+        action="store_true",
+        help=(
+            "Skip refreshing bin/stanc from --stanc3 before make. "
+            "Use after one-time bootstrap/init."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -126,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     stanc_copy_source = None
     stanc_bootstrap_command = None
-    if args.stanc3:
+    if args.stanc3 and not args.no_stanc_sync:
         local_stanc = os.path.join(
             args.stanc3,
             "_build",

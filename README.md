@@ -1,21 +1,16 @@
 # cmdsafestan
 
-Small SafeStan-first wrapper for CmdStan.
+SafeStan-first wrapper for CmdStan.
 
 ## Setup
 
 ```bash
 git submodule update --init --recursive safestan
+git -C safestan submodule update --init --recursive stan
 uv sync
 ```
 
-Initialize SafeStan runtime submodules (Stan + Math):
-
-```bash
-git -C safestan submodule update --init --recursive stan
-```
-
-If `safestan/_build/default/src/stanc/stanc.exe` does not exist yet, build compiler once:
+If `safestan/_build/default/src/stanc/stanc.exe` does not exist yet:
 
 ```bash
 cd safestan
@@ -23,30 +18,15 @@ opam exec -- dune build @install
 cd ..
 ```
 
-For executable builds and `lp__` runs, runtime C++ headers/libs are also
-required (not just the `stanc3` compiler). In practice this means:
+## Build and run
 
-- `safestan/stan/lib/stan_math/`
-- `safestan/stan/src/stan/`
-- `safestan/stan/lib/rapidjson_1.1.0/`
-
-If these are missing, use `.hpp` mode (safety checks still work).
-
-## Build
-
-Build model executable:
+Build executable:
 
 ```bash
 uv run cmdsafestan --sstan-protect y tests/safestan/models/good_bernoulli.stan
 ```
 
-Build `.hpp` only:
-
-```bash
-uv run cmdsafestan --target hpp --sstan-protect y tests/safestan/models/good_bernoulli.stan
-```
-
-## Run
+Run executable:
 
 ```bash
 printf '{"y": 1}\n' > /tmp/good_data.json
@@ -56,20 +36,20 @@ tests/safestan/models/good_bernoulli sample \
   output file=/tmp/good_output.csv
 ```
 
-## Python: model string -> safety + log-likelihood
+Build `.hpp` only:
 
-Use `evaluate_model_string` for the shortest path from Python string + Python dict data.
+```bash
+uv run cmdsafestan --target hpp --sstan-protect y tests/safestan/models/good_bernoulli.stan
+```
+
+## Python API (self-contained safe/unsafe example)
 
 ```python
-from cmdsafestan_api import evaluate_model_string
+from cmdsafestan_api import evaluate_model_string, init
 
 SAFE_MODEL = """
-data {
-  int<lower=0, upper=1> y;
-}
-parameters {
-  real<lower=0, upper=1> theta;
-}
+data { int<lower=0, upper=1> y; }
+parameters { real<lower=0, upper=1> theta; }
 model {
   theta ~ beta(1, 1);
   y ~ bernoulli(theta);
@@ -77,12 +57,8 @@ model {
 """
 
 UNSAFE_MODEL = """
-data {
-  int<lower=0, upper=1> y;
-}
-parameters {
-  real<lower=0, upper=1> theta;
-}
+data { int<lower=0, upper=1> y; }
+parameters { real<lower=0, upper=1> theta; }
 model {
   theta ~ beta(1, 1);
   target += 1;
@@ -92,31 +68,41 @@ model {
 
 data = {"y": 1}
 
+# Run once before multiprocessing workers start.
+# This syncs bin/stanc and builds shared runtime deps once.
+runtime = init(
+    cmdstan_root=".",
+    bootstrap=True,
+    build_runtime=True,
+    jobs=4,
+    stream_output=True,
+)
+
 safe_result = evaluate_model_string(
     SAFE_MODEL,
     data,
     protect=["y"],
-    cmdstan_root=".",
-    stream_output=True,  # show build/run diagnostics live
+    runtime=runtime,
+    stream_output=True,
 )
-print("safe?", safe_result.safe)
+print("safe?", safe_result.safe)                # True
 print("runtime ready?", safe_result.runtime_ready)
-print("lp__", safe_result.log_likelihood)
+print("lp__", safe_result.log_likelihood)       # float when runtime available
 
 unsafe_result = evaluate_model_string(
     UNSAFE_MODEL,
     data,
     protect=["y"],
-    cmdstan_root=".",
+    runtime=runtime,
 )
-print("safe?", unsafe_result.safe)
-print("violation:", unsafe_result.violation)
+print("safe?", unsafe_result.safe)              # False
+print("violation:", unsafe_result.violation)    # "SStan violation: ..."
 ```
 
-Notes:
+Behavior notes:
 
-- `safe_result.safe == True` means compilation passed SafeStan checks.
-- `runtime_ready` tells you whether executable run support is available.
-- `log_likelihood` is the run's `lp__` from one sample (quick scalar score) when runtime is available, otherwise `None`.
-- For unsafe models, `safe == False`, `log_likelihood == None`, and `violation` contains `SStan violation: ...`.
-- First call can be slow because it may compile runtime dependencies (SUNDIALS/TBB + model). Use `stream_output=True` to see progress.
+- `evaluate_model_string` uses a unique temporary directory per call for model/data/output files, so concurrent workers do not share per-model artifacts.
+- `init(..., bootstrap=True)` makes later calls faster by reusing shared built dependencies and skipping repeated global `bin/stanc` sync.
+- Default temp root after `init` is `.cmdsafestan-tmp/` under repo root (override with `tmp_root=...` in `init`).
+
+See runnable scripts in `examples/python/example.py` and `examples/python/example_good.py`.
