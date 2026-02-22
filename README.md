@@ -1,109 +1,109 @@
-# CmdStan for SafeStan
+# cmdsafestan
 
-This directory keeps the standard CmdStan workflow, with a SafeStan-oriented
-entrypoint layered on top.
+Small SafeStan-first wrapper for CmdStan.
 
-For upstream CmdStan background (interfaces, licensing, general installation
-notes), see:
-
-- `README_old.md`
-
-## What Is Added Here
-
-- `cmdsafestan`: a CmdStan-style CLI wrapper around `make` that always passes:
-  - `--sstanc`
-  - `--sstan-protect=<vars>`
-- `safestan` is the only supported module path in this fork (`stan` submodule is not used)
-- local compiler integration via `STANC3=...` (for your SafeStan-enabled
-  `stanc3` checkout)
-- two Python smoke tests for one valid and one invalid SafeStan model
-- optional `safestan` submodule pointing at `jkarwowski/safestanc3` (`master`)
-
-## Local SafeStan stanc3
-
-CmdStan already supports using a local `stanc3` source tree. In this fork,
-that is the intended path.
-
-In `make/local`:
-
-```make
-STANC3=safestan
-```
-
-Or initialize the bundled `safestan` submodule:
+## Setup
 
 ```bash
-git submodule update --init --remote safestan
+git submodule update --init --recursive safestan
+uv sync
 ```
 
-then in `make/local`:
-
-```make
-STANC3=safestan
-```
-
-Or per-command:
+If `safestan/_build/default/src/stanc/stanc.exe` does not exist yet, build once:
 
 ```bash
-STANC3=safestan make path/to/model.hpp
-```
-
-If `dune` is not directly on your `PATH`, local compiler builds can use:
-
-```bash
+cd safestan
 opam exec -- dune build @install
+cd ..
 ```
 
-## Using `cmdsafestan`
+For executable builds and `lp__` runs, runtime files are also needed under
+`safestan/lib/stan_math/`. If those files are missing, use `.hpp` mode (safety
+checks still work).
 
-Install with uv (editable/project install):
+## Build
+
+Build model executable:
 
 ```bash
-uv sync
+uv run cmdsafestan --sstan-protect y tests/safestan/models/good_bernoulli.stan
 ```
 
-(`uv.lock` pins this project as `source = { editable = "." }`.)
-
-Then run like normal CmdStan from `cmdstan/`:
-
-(`cmdsafestan` defaults to `STANC3=safestan`; override with `--stanc3` or
-environment variable `STANC3`.)
-
-Build model executable (default target):
+Build `.hpp` only:
 
 ```bash
-uv run cmdsafestan --sstan-protect y path/to/model.stan
+uv run cmdsafestan --target hpp --sstan-protect y tests/safestan/models/good_bernoulli.stan
 ```
 
-Translate only to C++ header (`.hpp`):
+## Run
 
 ```bash
-uv run cmdsafestan --target hpp --sstan-protect y path/to/model.stan
+printf '{"y": 1}\n' > /tmp/good_data.json
+tests/safestan/models/good_bernoulli sample \
+  num_warmup=200 num_samples=200 \
+  data file=/tmp/good_data.json \
+  output file=/tmp/good_output.csv
 ```
 
-Use an explicit local SafeStan compiler checkout:
+## Python: model string -> safety + log-likelihood
 
-```bash
-uv run cmdsafestan --stanc3 safestan --sstan-protect y path/to/model.stan
+Use `evaluate_model_string` for the shortest path from Python string + Python dict data.
+
+```python
+from cmdsafestan_api import evaluate_model_string
+
+SAFE_MODEL = """
+data {
+  int<lower=0, upper=1> y;
+}
+parameters {
+  real<lower=0, upper=1> theta;
+}
+model {
+  theta ~ beta(1, 1);
+  y ~ bernoulli(theta);
+}
+"""
+
+UNSAFE_MODEL = """
+data {
+  int<lower=0, upper=1> y;
+}
+parameters {
+  real<lower=0, upper=1> theta;
+}
+model {
+  theta ~ beta(1, 1);
+  target += 1;
+  y ~ bernoulli(theta);
+}
+"""
+
+data = {"y": 1}
+
+safe_result = evaluate_model_string(
+    SAFE_MODEL,
+    data,
+    protect=["y"],
+    cmdstan_root=".",
+)
+print("safe?", safe_result.safe)
+print("runtime ready?", safe_result.runtime_ready)
+print("lp__", safe_result.log_likelihood)
+
+unsafe_result = evaluate_model_string(
+    UNSAFE_MODEL,
+    data,
+    protect=["y"],
+    cmdstan_root=".",
+)
+print("safe?", unsafe_result.safe)
+print("violation:", unsafe_result.violation)
 ```
 
-Add extra stanc flags:
+Notes:
 
-```bash
-uv run cmdsafestan --sstan-protect y --stancflag=--warn-pedantic path/to/model.stan
-```
-
-## Python Smoke Tests (uv-managed)
-
-From `cmdstan/`:
-
-```bash
-uv sync
-uv run --project . python tests/safestan/test_cmdsafestan_good.py
-uv run --project . python tests/safestan/test_cmdsafestan_bad.py
-```
-
-Both tests call `cmdsafestan` and expect:
-
-- `good`: success and generated `.hpp`
-- `bad`: non-zero exit and `SStan violation:` diagnostic
+- `safe_result.safe == True` means compilation passed SafeStan checks.
+- `runtime_ready` tells you whether executable run support is available.
+- `log_likelihood` is the run's `lp__` from one sample (quick scalar score) when runtime is available, otherwise `None`.
+- For unsafe models, `safe == False`, `log_likelihood == None`, and `violation` contains `SStan violation: ...`.

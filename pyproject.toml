@@ -12,9 +12,10 @@ dependencies = []
 
 [project.scripts]
 cmdsafestan = "cmdsafestan_cli:main"
+cmdsafestan-api = "cmdsafestan_api:main"
 
 [tool.setuptools]
-py-modules = ["cmdsafestan_cli"]
+py-modules = ["cmdsafestan_api", "cmdsafestan_cli"]
 
 [tool.uv]
 package = true
