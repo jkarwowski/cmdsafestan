@@ -324,6 +324,28 @@ endif
 ##
 # Clean up.
 ##
+.PHONY: clean-model-eval-cache benchmark-api benchmark-api-warm benchmark-api-parallel
+
+BENCH_RUNS ?= 10
+BENCH_NPROC ?= 3
+BENCH_JOBS ?= 1
+BENCH_WARMUP ?= 1
+
+clean-model-eval-cache:
+	@echo '  removing model-evaluation cache'
+	$(RM) $(wildcard src/cmdstan/main*.o) $(wildcard src/cmdstan/main*.d)
+	$(RM) -r $(wildcard $(STAN)src/stan/model/model_header*.hpp.gch)
+	$(RM) -r .cmdsafestan-tmp
+
+benchmark-api:
+	uv run --project . python scripts/benchmark/benchmark_api.py --runs $(BENCH_RUNS)
+
+benchmark-api-warm: clean-model-eval-cache
+	uv run --project . python scripts/benchmark/benchmark_api.py --runs 5 --warmup-runs 1 --safe-only --jobs 1 --nproc 1
+
+benchmark-api-parallel: clean-model-eval-cache
+	uv run --project . python scripts/benchmark/benchmark_api.py --runs $(BENCH_RUNS) --warmup-runs $(BENCH_WARMUP) --safe-only --jobs $(BENCH_JOBS) --nproc $(BENCH_NPROC)
+
 .PHONY: clean clean-deps clean-all
 
 clean: clean-tests

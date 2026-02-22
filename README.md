@@ -105,17 +105,35 @@ Behavior notes:
 - `init(..., bootstrap=True)` makes later calls faster by reusing shared built dependencies and skipping repeated global `bin/stanc` sync.
 - Default temp root after `init` is `.cmdsafestan-tmp/` under repo root (override with `tmp_root=...` in `init`).
 
-## Benchmark (10 runs, split per-init and per-model)
+## Benchmark
+
+Warm-start benchmark for safe models (clean model-eval cache, 1 warmup run, then 5 measured runs, 1 core):
 
 ```bash
-uv run --project . python scripts/benchmark/benchmark_api.py --runs 10
+uv run --project . python scripts/benchmark/benchmark_api.py \
+  --clean-eval-cache --warmup-runs 1 --runs 5 --safe-only --jobs 1 --nproc 1
 ```
 
-This reports:
+Parallel benchmark (example: 10 measured runs on 3 processes):
 
-- per-run `init(...)` timing (`per_init`)
-- per-run safe-model timing (`per_model.safe`)
-- per-run unsafe-model timing (`per_model.unsafe`)
-- optional one-time bootstrap timing (`--bootstrap-first`)
+```bash
+uv run --project . python scripts/benchmark/benchmark_api.py \
+  --clean-eval-cache --warmup-runs 1 --runs 10 --safe-only --jobs 1 --nproc 3
+```
+
+Convenience make targets:
+
+```bash
+make benchmark-api
+make benchmark-api-warm
+make benchmark-api-parallel BENCH_RUNS=10 BENCH_NPROC=3 BENCH_JOBS=1
+```
+
+The benchmark reports:
+
+- warmup wall-clock time (`warmup.wall_seconds`)
+- measured wall-clock time and throughput (`measurement.wall_seconds`, `measurement.runs_per_second`)
+- per-run `init(...)` timing (`measurement.per_init`)
+- per-model timing and stage breakdown (`measurement.per_model`, `measurement.per_stage`)
 
 See runnable scripts in `examples/python/example.py` and `examples/python/example_good.py`.
