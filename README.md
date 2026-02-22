@@ -9,7 +9,13 @@ git submodule update --init --recursive safestan
 uv sync
 ```
 
-If `safestan/_build/default/src/stanc/stanc.exe` does not exist yet, build once:
+Initialize SafeStan runtime submodules (Stan + Math):
+
+```bash
+git -C safestan submodule update --init --recursive stan
+```
+
+If `safestan/_build/default/src/stanc/stanc.exe` does not exist yet, build compiler once:
 
 ```bash
 cd safestan
@@ -17,9 +23,14 @@ opam exec -- dune build @install
 cd ..
 ```
 
-For executable builds and `lp__` runs, runtime files are also needed under
-`safestan/lib/stan_math/`. If those files are missing, use `.hpp` mode (safety
-checks still work).
+For executable builds and `lp__` runs, runtime C++ headers/libs are also
+required (not just the `stanc3` compiler). In practice this means:
+
+- `safestan/stan/lib/stan_math/`
+- `safestan/stan/src/stan/`
+- `safestan/stan/lib/rapidjson_1.1.0/`
+
+If these are missing, use `.hpp` mode (safety checks still work).
 
 ## Build
 

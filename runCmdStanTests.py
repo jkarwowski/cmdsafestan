@@ -79,9 +79,9 @@ def makeBuild(j):
 
 def makeMathLibs(j):
     if j == None:
-        command = 'make -f safestan/lib/stan_math/make/standalone math-libs'
+        command = 'make -f safestan/stan/lib/stan_math/make/standalone math-libs'
     else:
-        command = 'make -j%d -f safestan/lib/stan_math/make/standalone math-libs' % j
+        command = 'make -j%d -f safestan/stan/lib/stan_math/make/standalone math-libs' % j
     doCommand(command)
 
 def makeTests(dirname, filenames, j):

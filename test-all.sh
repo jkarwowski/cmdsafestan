@@ -27,7 +27,7 @@ popd
 echo ''
 echo '------------------------------------------------------------'
 echo 'SafeStan Math Library tests'
-pushd safestan/lib/stan_math/
+pushd safestan/stan/lib/stan_math/
 ./runTests.py $RUNTESTARGS test/unit
 ./runTests.py $RUNTESTARGS test/prob
 popd

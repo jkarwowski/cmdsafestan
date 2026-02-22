@@ -19,7 +19,7 @@ help:
 
 -include make/local                       # user-defined variables
 
-STAN ?= safestan/
+STAN ?= safestan/stan/
 MATH ?= $(STAN)lib/stan_math/
 RAPIDJSON ?= $(STAN)lib/rapidjson_1.1.0/
 CLI11 ?= lib/CLI11-1.9.1/

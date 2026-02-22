@@ -77,6 +77,7 @@ def evaluate_model_string(
     protect: str | Sequence[str],
     cmdstan_root: str | Path = ".",
     stanc3: str = "safestan",
+    runtime_root: str | Path = "safestan/stan",
     seed: int = 12345,
 ) -> SafeStanResult:
     """Compile and run a model string, returning safety + lp__ summary."""
@@ -88,8 +89,18 @@ def evaluate_model_string(
     protect_value = _normalize_protect(protect)
     env = os.environ.copy()
     env.setdefault("STANC3", stanc3)
-    math_make = root / stanc3 / "lib" / "stan_math" / "make" / "compiler_flags"
-    runtime_ready = math_make.exists()
+    runtime = root / Path(runtime_root)
+    math_make = runtime / "lib" / "stan_math" / "make" / "compiler_flags"
+    stan_header = runtime / "src" / "stan" / "callbacks" / "writer.hpp"
+    rapidjson_dir = runtime / "lib" / "rapidjson_1.1.0"
+    missing_runtime: list[str] = []
+    if not math_make.exists():
+        missing_runtime.append(str(math_make))
+    if not stan_header.exists():
+        missing_runtime.append(str(stan_header))
+    if not rapidjson_dir.exists():
+        missing_runtime.append(str(rapidjson_dir))
+    runtime_ready = not missing_runtime
 
     with tempfile.TemporaryDirectory(prefix="cmdsafestan-api-", dir=root) as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -145,7 +156,8 @@ def evaluate_model_string(
                 runtime_ready=False,
                 run_returncode=None,
                 run_output=(
-                    f"Runtime unavailable: expected {math_make} for executable build."
+                    "Runtime unavailable: missing required runtime paths: "
+                    + ", ".join(missing_runtime)
                 ),
             )
 
@@ -239,6 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         default="safestan",
         help="Local SafeStan stanc3 path (default: safestan).",
     )
+    parser.add_argument(
+        "--runtime-root",
+        default="safestan/stan",
+        help="Runtime root containing src/stan and lib/{stan_math,rapidjson_1.1.0}.",
+    )
     args = parser.parse_args(argv)
 
     model_text = Path(args.model_file).read_text(encoding="utf-8")
@@ -249,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         protect=args.protect,
         cmdstan_root=args.cmdstan_root,
         stanc3=args.stanc3,
+        runtime_root=args.runtime_root,
     )
     print(json.dumps(result.__dict__, indent=2, sort_keys=True))
     return 0 if result.safe else 1

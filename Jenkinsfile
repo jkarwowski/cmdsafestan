@@ -79,7 +79,7 @@ pipeline {
                 sh 'make safestan-revert'
                 script {
                     utils.checkout_pr("stan", "safestan", params.stan_pr)
-                    utils.checkout_pr("math", "safestan/lib/stan_math", params.math_pr)
+                    utils.checkout_pr("math", "safestan/stan/lib/stan_math", params.math_pr)
                 }
 
                 stash 'CmdStanSetup'
@@ -181,7 +181,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('safestan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/stan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [
@@ -222,7 +222,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('safestan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/stan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [
@@ -255,7 +255,7 @@ pipeline {
                                 filters: [
                                     excludeFile('/lib/.*'),
                                     excludeFile('tbb/*'),
-                                    excludeFile('safestan/lib/stan_math/lib/*'),
+                                    excludeFile('safestan/stan/lib/stan_math/lib/*'),
                                     excludeMessage(".*'sprintf' is deprecated.*")
                                 ],
                                 tools: [
