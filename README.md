@@ -136,4 +136,4 @@ The benchmark reports:
 - per-run `init(...)` timing (`measurement.per_init`)
 - per-model timing and stage breakdown (`measurement.per_model`, `measurement.per_stage`)
 
-See runnable scripts in `examples/python/example.py` and `examples/python/example_good.py`.
+See runnable scripts in `examples/python/example_bad.py`, `examples/python/example_good.py`, and `examples/python/example_parallel.py`.
