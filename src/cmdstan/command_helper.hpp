@@ -573,12 +573,14 @@ inline std::vector<std::vector<double>> get_uparams_r(
  * method and send output to a CSV file.
  *
  * @param model Stan model
+ * @param propto propto flag; when true, drop additive constants independent of
+ * parameters
  * @param jacobian jacobian adjustment flag
  * @param params_set array of unconstrained parameter values
  * @
  */
 inline void services_log_prob_grad(const stan::model::model_base &model,
-                                   bool jacobian,
+                                   bool propto, bool jacobian,
                                    std::vector<std::vector<double>> &params_set,
                                    stan::callbacks::writer &output) {
   // header
@@ -593,12 +595,18 @@ inline void services_log_prob_grad(const stan::model::model_base &model,
   double lp;
   std::vector<double> gradients;
   for (auto &&params : params_set) {
-    if (jacobian) {
+    if (propto && jacobian) {
       lp = stan::model::log_prob_grad<true, true>(model, params, dummy_params_i,
                                                   gradients);
-    } else {
+    } else if (propto && !jacobian) {
       lp = stan::model::log_prob_grad<true, false>(model, params,
                                                    dummy_params_i, gradients);
+    } else if (!propto && jacobian) {
+      lp = stan::model::log_prob_grad<false, true>(model, params,
+                                                   dummy_params_i, gradients);
+    } else {
+      lp = stan::model::log_prob_grad<false, false>(model, params,
+                                                    dummy_params_i, gradients);
     }
     // unfortunate: var.grad clears the vector, so need to insert lp afterwards
     gradients.insert(gradients.begin(), lp);
