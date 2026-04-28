@@ -149,6 +149,28 @@ TEST_F(CmdStan, log_prob_uparams_json) {
   ASSERT_FLOAT_EQ(values[0], -26.1950918);
 }
 
+TEST_F(CmdStan, log_prob_uparams_json_include_constants) {
+  std::stringstream ss;
+  ss << convert_model_path(bern_log_prob_model)
+     << " data file=" << convert_model_path(bern_data)
+     << " output file=" << convert_model_path(test_output)
+     << " method=log_prob propto=0 unconstrained_params="
+     << convert_model_path(bern_unconstrained_params_json);
+  std::string cmd = ss.str();
+  run_command_output out = run_command(cmd);
+  ASSERT_FALSE(out.hasError);
+  std::vector<std::string> config;
+  std::vector<std::string> header;
+  std::vector<double> values;
+  parse_sample(convert_model_path(test_output), config, header, values);
+  std::vector<std::string> names;
+  boost::split(names, header[0], boost::is_any_of(","),
+               boost::token_compress_on);
+  ASSERT_EQ(values.size() % names.size(), 0);
+
+  ASSERT_NEAR(values[0], -42.7359854, 1e-6);
+}
+
 TEST_F(CmdStan, log_prob_uparams_multi_json) {
   std::stringstream ss;
   ss << convert_model_path(bern_log_prob_model)

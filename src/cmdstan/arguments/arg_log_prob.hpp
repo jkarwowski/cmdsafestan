@@ -18,11 +18,13 @@ class arg_log_prob : public categorical_argument {
   arg_log_prob() {
     _name = "log_prob";
     _description
-        = "Return the log density up to a constant and its gradients, "
-          "given supplied parameters";
+        = "Return the log density and its gradients, given supplied parameters";
 
     _subarguments.push_back(new arg_log_prob_unconstrained_params());
     _subarguments.push_back(new arg_log_prob_constrained_params());
+    _subarguments.push_back(new arg_single_bool(
+        "propto",
+        "When true, drop additive constants independent of parameters", true));
     _subarguments.push_back(
         new arg_single_bool("jacobian",
                             "When true, include change-of-variables adjustment"

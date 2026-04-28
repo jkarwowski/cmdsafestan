@@ -132,6 +132,13 @@ uv run --project . python scripts/benchmark/benchmark_api.py \
   --clean-eval-cache --warmup-runs 1 --runs 5 --safe-only --jobs 1 --nproc 1
 ```
 
+Compute a full log probability, including constants from sampling statements,
+with the generated model executable:
+
+```bash
+./path/to/model data file=data.json method=log_prob propto=0 unconstrained_params=params.json
+```
+
 Parallel benchmark (example: 10 measured runs on 3 processes):
 
 ```bash
