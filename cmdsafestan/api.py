@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import shlex
@@ -13,9 +14,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 
 @dataclass
@@ -32,6 +34,7 @@ class SafeStanResult:
     run_returncode: int | None
     run_output: str
     timings_seconds: dict[str, float] = field(default_factory=dict)
+    output_values: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,66 @@ def _extract_lp(csv_path: Path) -> float | None:
             except (IndexError, ValueError):
                 return None
     return None
+
+
+def _extract_output_values(
+    csv_path: Path,
+    *,
+    output_variables: Sequence[str] | None = None,
+) -> dict[str, float]:
+    requested = {str(name) for name in output_variables or ()}
+    requested.add("lp__")
+    header: list[str] | None = None
+    values: dict[str, float] = {}
+    with csv_path.open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(",")
+            if header is None:
+                header = parts
+                continue
+            for name in requested:
+                if name not in header:
+                    continue
+                try:
+                    value = float(parts[header.index(name)])
+                except (IndexError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    values[name] = value
+            return values
+    return values
+
+
+def _find_system_compiler(name: str) -> str:
+    return shutil.which(name, path=os.defpath) or f"/usr/bin/{name}"
+
+
+def _prepare_build_env() -> dict[str, str]:
+    env = os.environ.copy()
+    if platform.system() == "Windows":
+        return env
+
+    cc = env.get("CC", "").strip()
+    cxx = env.get("CXX", "").strip()
+    compiler_name = Path(cxx.split()[0]).name if cxx else ""
+    looks_conda_wrapped = "conda" in cc or "conda" in cxx
+    unsupported_cxx = bool(
+        compiler_name and "g++" not in compiler_name and "clang++" not in compiler_name
+    )
+    if looks_conda_wrapped or unsupported_cxx:
+        gcc = _find_system_compiler("gcc")
+        gxx = _find_system_compiler("g++")
+        env["CC"] = gcc
+        env["CXX"] = gxx
+        env["CXX_TYPE"] = "gcc"
+        env["TBB_CC"] = gcc
+        env["TBB_CXX_TYPE"] = "gcc"
+        for key in ("CFLAGS", "CPPFLAGS", "CXXFLAGS", "LDFLAGS", "AR", "LD", "RANLIB"):
+            env.pop(key, None)
+    return env
 
 
 def _resolve_root(cmdstan_root: str | Path) -> Path:
@@ -310,6 +373,7 @@ def evaluate_model_string(
     no_stanc_sync: bool | None = None,
     enforce_safety: bool = True,
     run_sample: bool = True,
+    output_variables: Sequence[str] | None = None,
 ) -> SafeStanResult:
     """Compile and run a model string, returning safety + lp__ summary.
 
@@ -330,7 +394,7 @@ def evaluate_model_string(
             no_stanc_sync=False,
         )
     runtime.tmp_root.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
+    env = _prepare_build_env()
     env["STANC3"] = runtime.stanc3
 
     use_no_stanc_sync = runtime.no_stanc_sync if no_stanc_sync is None else no_stanc_sync
@@ -472,7 +536,12 @@ def evaluate_model_string(
             stream_output=stream_output,
         )
         timings_seconds["run_sample"] = time.perf_counter() - run_start
-        lp_value = _extract_lp(output_csv) if run_rc == 0 else None
+        output_values = (
+            _extract_output_values(output_csv, output_variables=output_variables)
+            if run_rc == 0
+            else {}
+        )
+        lp_value = output_values.get("lp__")
         timings_seconds["total"] = time.perf_counter() - total_start
 
         return SafeStanResult(
@@ -486,7 +555,225 @@ def evaluate_model_string(
             run_returncode=run_rc,
             run_output=run_output,
             timings_seconds=timings_seconds,
+            output_values=output_values,
         )
+
+
+def evaluate_model_string_many_data(
+    model_code: str,
+    data_items: Sequence[dict[str, Any]],
+    *,
+    protect: str | Sequence[str],
+    runtime: SafeStanRuntime | None = None,
+    cmdstan_root: str | Path = ".",
+    stanc3: str = "safestan",
+    runtime_root: str | Path = "safestan/stan",
+    tmp_root: str | Path | None = None,
+    seed: int = 12345,
+    stream_output: bool = False,
+    jobs: int | None = None,
+    no_stanc_sync: bool | None = None,
+    enforce_safety: bool = True,
+    run_sample: bool = True,
+    output_variables: Sequence[str] | None = None,
+) -> list[SafeStanResult]:
+    """Compile one model string once, then run it against multiple data payloads."""
+
+    if jobs is not None and jobs < 1:
+        raise ValueError("jobs must be >= 1")
+    if not data_items:
+        return []
+
+    protect_value = _normalize_protect(protect) if enforce_safety else None
+    if runtime is None:
+        runtime = _resolve_runtime(
+            cmdstan_root=cmdstan_root,
+            stanc3=stanc3,
+            runtime_root=runtime_root,
+            tmp_root=tmp_root,
+            no_stanc_sync=False,
+        )
+    runtime.tmp_root.mkdir(parents=True, exist_ok=True)
+    env = _prepare_build_env()
+    env["STANC3"] = runtime.stanc3
+
+    use_no_stanc_sync = runtime.no_stanc_sync if no_stanc_sync is None else no_stanc_sync
+    missing_runtime = _missing_runtime_paths(runtime)
+    runtime_ready = not missing_runtime
+    total_start = time.perf_counter()
+    timings_seconds: dict[str, float] = {}
+
+    with tempfile.TemporaryDirectory(prefix="cmdsafestan-api-", dir=runtime.tmp_root) as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        model_path = tmp_path / "model.stan"
+        model_exe = tmp_path / f"model{'.exe' if platform.system() == 'Windows' else ''}"
+
+        write_start = time.perf_counter()
+        model_path.write_text(model_code, encoding="utf-8")
+        timings_seconds["write_inputs"] = time.perf_counter() - write_start
+
+        compile_cmd = _cmdsafestan_command(
+            runtime=runtime,
+            model_path=model_path,
+            protect_value=protect_value,
+            enforce_safety=enforce_safety,
+            target="hpp",
+            no_stanc_sync=use_no_stanc_sync,
+            jobs=jobs,
+        )
+        compile_hpp_start = time.perf_counter()
+        compile_rc, compile_output = _run_command(
+            compile_cmd,
+            cwd=runtime.cmdstan_root,
+            env=env,
+            stream_output=stream_output,
+        )
+        timings_seconds["compile_hpp"] = time.perf_counter() - compile_hpp_start
+        violation = _extract_violation(compile_output) if enforce_safety else None
+        if compile_rc != 0:
+            timings_seconds["total"] = time.perf_counter() - total_start
+            return [
+                SafeStanResult(
+                    safe=False,
+                    safety_enforced=enforce_safety,
+                    log_likelihood=None,
+                    compile_returncode=compile_rc,
+                    compile_output=compile_output,
+                    violation=violation,
+                    runtime_ready=runtime_ready,
+                    run_returncode=None,
+                    run_output="",
+                    timings_seconds=dict(timings_seconds),
+                )
+                for _ in data_items
+            ]
+
+        if not run_sample:
+            timings_seconds["total"] = time.perf_counter() - total_start
+            return [
+                SafeStanResult(
+                    safe=True,
+                    safety_enforced=enforce_safety,
+                    log_likelihood=None,
+                    compile_returncode=compile_rc,
+                    compile_output=compile_output,
+                    violation=violation,
+                    runtime_ready=runtime_ready,
+                    run_returncode=None,
+                    run_output="Run skipped (run_sample=False).",
+                    timings_seconds=dict(timings_seconds),
+                )
+                for _ in data_items
+            ]
+
+        if not runtime_ready:
+            timings_seconds["total"] = time.perf_counter() - total_start
+            run_output = (
+                "Runtime unavailable: missing required runtime paths: "
+                + ", ".join(missing_runtime)
+            )
+            return [
+                SafeStanResult(
+                    safe=True,
+                    safety_enforced=enforce_safety,
+                    log_likelihood=None,
+                    compile_returncode=compile_rc,
+                    compile_output=compile_output,
+                    violation=violation,
+                    runtime_ready=False,
+                    run_returncode=None,
+                    run_output=run_output,
+                    timings_seconds=dict(timings_seconds),
+                )
+                for _ in data_items
+            ]
+
+        exe_build_cmd = _cmdsafestan_command(
+            runtime=runtime,
+            model_path=model_path,
+            protect_value=protect_value,
+            enforce_safety=enforce_safety,
+            target=None,
+            no_stanc_sync=use_no_stanc_sync,
+            jobs=jobs,
+        )
+        compile_exe_start = time.perf_counter()
+        exe_build_rc, exe_build_output = _run_command(
+            exe_build_cmd,
+            cwd=runtime.cmdstan_root,
+            env=env,
+            stream_output=stream_output,
+        )
+        timings_seconds["compile_exe"] = time.perf_counter() - compile_exe_start
+        if exe_build_rc != 0:
+            timings_seconds["total"] = time.perf_counter() - total_start
+            return [
+                SafeStanResult(
+                    safe=True,
+                    safety_enforced=enforce_safety,
+                    log_likelihood=None,
+                    compile_returncode=compile_rc,
+                    compile_output=compile_output,
+                    violation=violation,
+                    runtime_ready=True,
+                    run_returncode=exe_build_rc,
+                    run_output=exe_build_output,
+                    timings_seconds=dict(timings_seconds),
+                )
+                for _ in data_items
+            ]
+
+        results: list[SafeStanResult] = []
+        for idx, data in enumerate(data_items):
+            data_path = tmp_path / f"data_{idx:04d}.json"
+            output_csv = tmp_path / f"output_{idx:04d}.csv"
+            data_path.write_text(json.dumps(data), encoding="utf-8")
+            run_cmd = [
+                str(model_exe),
+                "sample",
+                "num_warmup=0",
+                "num_samples=1",
+                "adapt",
+                "engaged=0",
+                "random",
+                f"seed={seed + idx}",
+                "data",
+                f"file={data_path}",
+                "output",
+                f"file={output_csv}",
+                "refresh=0",
+            ]
+            run_start = time.perf_counter()
+            run_rc, run_output = _run_command(
+                run_cmd,
+                cwd=runtime.cmdstan_root,
+                env=env,
+                stream_output=stream_output,
+            )
+            item_timings = dict(timings_seconds)
+            item_timings["run_sample"] = time.perf_counter() - run_start
+            item_timings["total"] = time.perf_counter() - total_start
+            output_values = (
+                _extract_output_values(output_csv, output_variables=output_variables)
+                if run_rc == 0
+                else {}
+            )
+            results.append(
+                SafeStanResult(
+                    safe=True,
+                    safety_enforced=enforce_safety,
+                    log_likelihood=output_values.get("lp__"),
+                    compile_returncode=compile_rc,
+                    compile_output=compile_output,
+                    violation=violation,
+                    runtime_ready=True,
+                    run_returncode=run_rc,
+                    run_output=run_output,
+                    timings_seconds=item_timings,
+                    output_values=output_values,
+                )
+            )
+        return results
 
 
 def main(argv: list[str] | None = None) -> int:
